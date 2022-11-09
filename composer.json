@@ -1,5 +1,5 @@
 {
-    "name": "longlang/phpkafka",
+    "name": "fattureincloud/phpkafka",
     "description": "A kafka client. Support php-fpm and Swoole.",
     "license": "Apache-2.0",
     "require": {
