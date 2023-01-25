@@ -9,6 +9,7 @@ use longlang\phpkafka\Exception\KafkaErrorException;
 use Aws\Credentials\CredentialProvider;
 use Aws\Signature\SignatureV4;
 use GuzzleHttp\Psr7\Request;
+use longlang\phpkafka\Socket\SocketInterface;
 
 class AwsMskIamSasl implements SaslInterface
 {
@@ -28,9 +29,9 @@ class AwsMskIamSasl implements SaslInterface
     protected $config;
 
     /**
-     * @var string
+     * @var SocketInterface
      */
-    protected $host;
+    protected $socket;
 
 
     public function __construct(CommonConfig $config)
@@ -38,9 +39,9 @@ class AwsMskIamSasl implements SaslInterface
         $this->config = $config;
     }
 
-    public function setHost(string $host): void
+    public function setSocket(SocketInterface $socket): void
     {
-        $this->host = $host;
+        $this->socket = $socket;
     }
 
     /**
@@ -58,9 +59,11 @@ class AwsMskIamSasl implements SaslInterface
     public function getAuthBytes(): string
     {
         $config = $this->config->getSasl();
-        if (empty($this->host) || empty($config['region'])) {
+        if (empty($this->socket) || empty($config['region'])) {
             throw new KafkaErrorException('AWS MSK config params not found');
         }
+
+        $host = $this->socket->getHost();
 
         $query = http_build_query(array(
             self::QUERY_ACTION_KEY => self::SIGN_ACTION,
@@ -74,7 +77,7 @@ class AwsMskIamSasl implements SaslInterface
 
         $region = $config['region'];
 
-        $url = "kafka://" . $this->host . "/?" . $query;
+        $url = "kafka://" . $host . "/?" . $query;
         $provider = CredentialProvider::defaultProvider();
         // Returns a CredentialsInterface or throws.
         $creds = $provider()->wait();
@@ -85,16 +88,15 @@ class AwsMskIamSasl implements SaslInterface
         $signedReq = $signer->presign($req, $creds, $expiration);
         $signedUri = $signedReq->getUri();
 
-        $url_components = parse_url((string)$signedUri);
-        parse_str($url_components['query'], $params);
+        parse_str($signedUri->getQuery(), $params);
 
         $headers = $signedReq->getHeaders();
 
         $signedMap = array(
             self::SIGN_VERSION_KEY => self::SIGN_VERSION,
-            self::SIGN_USER_AGENT_KEY => "php-kafka/sasl/aws_msk_iam/" . phpversion(),
+            self::SIGN_USER_AGENT_KEY => "php-kafka/sasl/aws_msk_iam/" . PHP_VERSION,
             self::SIGN_ACTION_KEY => self::SIGN_ACTION,
-            self::SIGN_HOST_KEY => $this->host
+            self::SIGN_HOST_KEY => $host
         );
 
         foreach ($params as $params_key => $params_value) {
@@ -102,8 +104,9 @@ class AwsMskIamSasl implements SaslInterface
         }
 
         foreach ($headers as $header_key => $header_value) {
-            if (strtolower($header_key) != strtolower(self::SIGN_HOST_KEY)) {
-                $signedMap[strtolower($header_key)] = $header_value;
+            $header_key = strtolower($header_key);
+            if ($header_key !== self::SIGN_HOST_KEY) {
+                $signedMap[$header_key] = $header_value;
             }
         }
         return json_encode($signedMap);
