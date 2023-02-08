@@ -152,6 +152,7 @@ class Producer
         foreach ($topicsMap as $brokerId => $topics) {
             $retryTopics = [];
             for ($retryCount = 0; $retryCount <= $produceRetry; ++$retryCount) {
+                $rt = microtime(true);
                 if ($retryTopics) {
                     foreach ($topics as $k => $v) {
                         $name = $v->getName();
@@ -169,9 +170,12 @@ class Producer
                     }
                 }
                 $request->setTopics($topics);
+                $times[] = ['rt' => microtime(true) - $rt];
 
                 $hasResponse = 0 !== $acks;
+                $getClient = microtime(true);
                 $client = $broker->getClient($brokerId);
+                $times[] = ['getClient' => microtime(true) - $getClient];
                 $actualSend = microtime(true);
                 $correlationId = $client->send($request, null, $hasResponse);
                 $times[] = ['actualSend' => microtime(true) - $actualSend];
