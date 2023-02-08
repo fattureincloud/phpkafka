@@ -172,13 +172,18 @@ class Producer
 
                 $hasResponse = 0 !== $acks;
                 $client = $broker->getClient($brokerId);
+                $actualSend = microtime(true);
                 $correlationId = $client->send($request, null, $hasResponse);
+                $times[] = ['actualSend' => microtime(true) - $actualSend];
                 if (!$hasResponse) {
                     break;
                 }
                 /** @var ProduceResponse $response */
+                $recv = microtime(true);
                 $response = $client->recv($correlationId);
+                $times[] = ['recv' => microtime(true) - $recv];
                 $retryTopics = [];
+                $respo = microtime(true);
                 foreach ($response->getResponses() as $response) {
                     $topicName = $response->getName();
                     foreach ($response->getPartitions() as $partition) {
@@ -193,6 +198,7 @@ class Producer
                         }
                     }
                 }
+                $times[] = ['response' => microtime(true) - $respo, 'retryTopics' => $retryTopics];
                 if (!$retryTopics) {
                     break;
                 }
