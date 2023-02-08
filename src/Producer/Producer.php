@@ -48,18 +48,19 @@ class Producer
     /**
      * @param RecordHeader[]|array $headers
      */
-    public function send(string $topic, ?string $value, ?string $key = null, array $headers = [], ?int $partitionIndex = null): void
+    public function send(string $topic, ?string $value, ?string $key = null, array $headers = [], ?int $partitionIndex = null)
     {
         $message = new ProduceMessage($topic, $value, $key, $headers, $partitionIndex);
         $messages = [$message];
-        $this->sendBatch($messages);
+        return $this->sendBatch($messages);
     }
 
     /**
      * @param ProduceMessage[] $messages
      */
-    public function sendBatch(array $messages): void
+    public function sendBatch(array $messages)
     {
+        $times = [];
         $config = $this->config;
         $broker = $this->broker;
         $request = new ProduceRequest();
@@ -76,16 +77,25 @@ class Producer
         $topicsMap = [];
         $partitionsMap = [];
         $topics = [];
+        $getTopicTime = microtime(true);
         foreach ($messages as $message) {
             $topics[] = $message->getTopic();
         }
+        $times[] = ['getTopic' => microtime(true) - $getTopicTime];
+        $getTopicMeta = microtime(true);
         $topicsMeta = $broker->getTopicsMeta($topics);
+        $times[] = ['getTopicMeta' => microtime(true) - $getTopicMeta];
         foreach ($messages as $message) {
             $topicName = $message->getTopic();
             $value = $message->getValue();
             $key = $message->getKey();
+            $getPartition = microtime(true);
             $partitionIndex = $message->getPartitionIndex() ?? $this->partitioner->partition($topicName, $value, $key, $topicsMeta);
+            $times[] = ['getPartition' => microtime(true) - $getPartition];
+            $getBrokerId = microtime(true);
             $brokerId = $broker->getBrokerIdByTopic($topicName, $partitionIndex);
+            $times[] = ['getBrokerId' => microtime(true) - $getBrokerId];
+            $getPartitions = microtime(true);
             if (isset($topicsMap[$brokerId][$topicName])) {
                 /** @var TopicProduceData $topicData */
                 $topicData = $topicsMap[$brokerId][$topicName];
@@ -95,6 +105,8 @@ class Producer
                 $topicData->setName($topicName);
                 $partitions = [];
             }
+            $times[] = ['getPartitions' => microtime(true) - $getPartitions];
+            $getRecords = microtime(true);
             if (isset($partitionsMap[$topicName][$partitionIndex])) {
                 /** @var PartitionProduceData $partition */
                 $partition = $partitionsMap[$topicName][$partitionIndex];
@@ -112,6 +124,7 @@ class Producer
                 $recordBatch->setLastOffsetDelta(-1);
                 $records = [];
             }
+            $times[] = ['getRecords' => microtime(true) - $getRecords];
             $offsetDelta = $recordBatch->getLastOffsetDelta() + 1;
             $recordBatch->setLastOffsetDelta($offsetDelta);
             $record = $records[] = new Record();
@@ -133,6 +146,7 @@ class Producer
 
             $topicData->setPartitions($partitions);
         }
+        $retries = microtime(true);
         $produceRetry = $config->getProduceRetry();
         $produceRetrySleep = $config->getProduceRetrySleep();
         foreach ($topicsMap as $brokerId => $topics) {
@@ -185,6 +199,8 @@ class Producer
                 usleep((int) ($produceRetrySleep * 1000000));
             }
         }
+        $times[] = ['retries' => microtime(true) - $retries];
+        return $times;
     }
 
     public function close(): void
